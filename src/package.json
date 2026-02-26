@@ -1,0 +1,29 @@
+{
+  "name": "ai-engineering-manager",
+  "version": "1.0.0",
+  "description": "AI-powered Slack standup bot with JIRA integration using Ollama",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "keywords": [
+    "slack",
+    "jira",
+    "standup",
+    "ai",
+    "ollama",
+    "llama"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@slack/bolt": "^3.17.0",
+    "@slack/web-api": "^6.11.0",
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "node-cron": "^3.0.3",
+    "node-schedule": "^2.1.1"
+  }
+}
