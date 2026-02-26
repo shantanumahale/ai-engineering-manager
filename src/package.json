@@ -6,7 +6,9 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "test:cli": "node test/cliTestRunner.js",
+    "test:demo": "node test/automatedDemo.js"
   },
   "keywords": [
     "slack",

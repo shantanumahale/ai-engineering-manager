@@ -1,5 +1,5 @@
 /**
- * LLM Service using Ollama
+ * LLM Service - Supports OpenAI and Ollama
  * Handles all AI/LLM interactions for:
  * - Analyzing standup responses
  * - Extracting task updates
@@ -45,6 +45,7 @@ Extract the following information and respond in JSON format ONLY (no other text
     "blockers": ["List of any blockers mentioned"],
     "isOffTopic": true/false,
     "offTopicReason": "Reason if off-topic (e.g., 'discussing HLD', 'unrelated topic')" or null,
+    "needsClarification": true/false,
     "followUpQuestions": ["Questions to ask for missing info like timelines"],
     "summary": "Brief summary of the update"
 }
@@ -52,18 +53,145 @@ Extract the following information and respond in JSON format ONLY (no other text
 Rules:
 - If developer discusses technical implementation details or HLD, mark as isOffTopic
 - If no timeline given for To-Do or In-Progress tasks, add follow-up question
+- Set needsClarification to true if the response is vague, incomplete, or doesn't provide actionable info
 - Extract specific ticket updates when mentioned
 - Keep summary concise (1-2 sentences)`;
 
 class LLMService {
   constructor() {
-    this.baseUrl = config.ollama.baseUrl.replace(/\/$/, '');
-    this.model = config.ollama.model;
-    this.timeout = config.ollama.timeout;
+    this.provider = config.llm.provider;
+    
+    if (this.provider === 'anthropic') {
+      this.apiKey = config.anthropic.apiKey;
+      this.model = config.anthropic.model;
+      this.timeout = config.anthropic.timeout;
+      this.baseUrl = config.anthropic.baseUrl.replace(/\/$/, '');
+    } else if (this.provider === 'openai') {
+      this.apiKey = config.openai.apiKey;
+      this.model = config.openai.model;
+      this.timeout = config.openai.timeout;
+      this.baseUrl = config.openai.baseUrl || 'https://api.openai.com/v1';
+    } else {
+      // Ollama (local)
+      this.baseUrl = config.ollama.baseUrl.replace(/\/$/, '');
+      this.model = config.ollama.model;
+      this.timeout = config.ollama.timeout;
+    }
+    
+    console.log(`LLM Service initialized with provider: ${this.provider}, model: ${this.model}`);
   }
 
   /**
-   * Make a request to Ollama API
+   * Make a request to the configured LLM provider
+   * @param {string} prompt - The user prompt
+   * @param {string} systemPrompt - Optional system prompt
+   * @returns {Promise<string>} Generated response
+   */
+  async callLLM(prompt, systemPrompt = null) {
+    if (this.provider === 'anthropic') {
+      return this.callAnthropic(prompt, systemPrompt);
+    } else if (this.provider === 'openai') {
+      return this.callOpenAI(prompt, systemPrompt);
+    } else {
+      return this.callOllama(prompt, systemPrompt);
+    }
+  }
+
+  /**
+   * Make a request to Anthropic API (Claude)
+   * @param {string} prompt - The user prompt
+   * @param {string} systemPrompt - Optional system prompt
+   * @returns {Promise<string>} Generated response
+   */
+  async callAnthropic(prompt, systemPrompt = null) {
+    const url = `${this.baseUrl}/v1/messages`;
+
+    const payload = {
+      model: this.model,
+      max_tokens: 4096,
+      messages: [{ role: 'user', content: prompt }],
+    };
+
+    if (systemPrompt) {
+      payload.system = systemPrompt;
+    }
+
+    try {
+      console.log(`Calling Anthropic with model ${this.model}...`);
+      const response = await axios.post(url, payload, {
+        timeout: this.timeout,
+        headers: {
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      // Anthropic returns content as an array of content blocks
+      const content = response.data.content;
+      if (content && content.length > 0) {
+        return content.map(block => block.text || '').join('');
+      }
+      return '';
+    } catch (error) {
+      if (error.code === 'ECONNABORTED') {
+        console.error('Anthropic request timed out');
+      } else if (error.response) {
+        console.error('Anthropic API error:', error.response.status, error.response.data?.error?.message || error.message);
+      } else {
+        console.error('Anthropic API error:', error.message);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Make a request to OpenAI API
+   * @param {string} prompt - The user prompt
+   * @param {string} systemPrompt - Optional system prompt
+   * @returns {Promise<string>} Generated response
+   */
+  async callOpenAI(prompt, systemPrompt = null) {
+    const url = `${this.baseUrl}/chat/completions`;
+
+    const messages = [];
+    if (systemPrompt) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+    messages.push({ role: 'user', content: prompt });
+
+    const payload = {
+      model: this.model,
+      messages,
+      temperature: 0.7,
+      top_p: 0.9,
+    };
+
+    try {
+      console.log(`Calling OpenAI with model ${this.model}...`);
+      const response = await axios.post(url, payload, {
+        timeout: this.timeout,
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      return response.data.choices[0]?.message?.content || '';
+    } catch (error) {
+      if (error.code === 'ECONNABORTED') {
+        console.error('OpenAI request timed out');
+      } else if (error.response) {
+        console.error('OpenAI API error:', error.response.status, error.response.data?.error?.message || error.message);
+      } else {
+        console.error('OpenAI API error:', error.message);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Make a request to Ollama API (local)
    * @param {string} prompt - The user prompt
    * @param {string} systemPrompt - Optional system prompt
    * @returns {Promise<string>} Generated response
@@ -114,7 +242,7 @@ class LLMService {
       .replace('{response}', response);
 
     try {
-      const result = await this.callOllama(prompt, SYSTEM_PROMPT);
+      const result = await this.callLLM(prompt, SYSTEM_PROMPT);
 
       // Parse JSON from response
       const jsonStart = result.indexOf('{');
@@ -129,6 +257,7 @@ class LLMService {
           blockers: data.blockers || [],
           isOffTopic: data.isOffTopic || false,
           offTopicReason: data.offTopicReason || null,
+          needsClarification: data.needsClarification || false,
           followUpQuestions: data.followUpQuestions || [],
           summary: data.summary || 'Update received.',
         };
@@ -140,6 +269,7 @@ class LLMService {
         blockers: [],
         isOffTopic: false,
         offTopicReason: null,
+        needsClarification: false,
         followUpQuestions: [],
         summary: 'Update received.',
       };
@@ -150,6 +280,7 @@ class LLMService {
         blockers: [],
         isOffTopic: false,
         offTopicReason: null,
+        needsClarification: false,
         followUpQuestions: [],
         summary: 'Update received.',
       };
@@ -176,7 +307,7 @@ Generate a brief, friendly message that:
 Keep it under 2 sentences.`;
 
     try {
-      return await this.callOllama(prompt, SYSTEM_PROMPT);
+      return await this.callLLM(prompt, SYSTEM_PROMPT);
     } catch (error) {
       console.error('Error generating redirect message:', error.message);
       return "That's a great point! Let's discuss that separately. For now, could you share your task status updates?";
@@ -202,7 +333,7 @@ Generate a brief, friendly question to get the missing information.
 Keep it conversational and under 1-2 sentences.`;
 
     try {
-      return await this.callOllama(prompt, SYSTEM_PROMPT);
+      return await this.callLLM(prompt, SYSTEM_PROMPT);
     } catch (error) {
       console.error('Error generating follow-up:', error.message);
       return `Could you also share ${missingInfo}?`;
@@ -228,7 +359,7 @@ Create a concise summary that includes:
 Keep it under 5 bullet points.`;
 
     try {
-      return await this.callOllama(prompt, SYSTEM_PROMPT);
+      return await this.callLLM(prompt, SYSTEM_PROMPT);
     } catch (error) {
       console.error('Error generating summary:', error.message);
       return 'Standup complete. Please review individual updates above.';
@@ -236,10 +367,115 @@ Keep it under 5 bullet points.`;
   }
 
   /**
+   * Check if the configured LLM is available
+   * @returns {Promise<boolean>} True if LLM is available
+   */
+  async checkModelAvailable() {
+    if (this.provider === 'anthropic') {
+      return this.checkAnthropicAvailable();
+    } else if (this.provider === 'openai') {
+      return this.checkOpenAIAvailable();
+    } else {
+      return this.checkOllamaModelAvailable();
+    }
+  }
+
+  /**
+   * Check if Anthropic API is accessible
+   * @returns {Promise<boolean>} True if API is accessible
+   */
+  async checkAnthropicAvailable() {
+    try {
+      if (!this.apiKey) {
+        console.error('Anthropic API key not configured. Set ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY in .env');
+        return false;
+      }
+
+      // Anthropic doesn't have a models endpoint, so we do a simple test call
+      const url = `${this.baseUrl}/v1/messages`;
+      const response = await axios.post(url, {
+        model: this.model,
+        max_tokens: 10,
+        messages: [{ role: 'user', content: 'Hi' }],
+      }, {
+        timeout: 15000,
+        headers: {
+          'x-api-key': this.apiKey,
+          'anthropic-version': '2023-06-01',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (response.status === 200) {
+        console.log(`Anthropic model ${this.model} is available`);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      if (error.response?.status === 401) {
+        console.error('Invalid Anthropic API key. Please check your ANTHROPIC_AUTH_TOKEN');
+        return false;
+      } else if (error.response?.status === 400 || error.response?.status === 404) {
+        console.error(`Anthropic model '${this.model}' may not be available:`, error.response?.data?.error?.message || error.message);
+        return false;
+      } else {
+        console.error('Failed to check Anthropic availability:', error.message);
+        return false;
+      }
+    }
+  }
+
+  /**
+   * Check if OpenAI API is accessible
+   * @returns {Promise<boolean>} True if API is accessible
+   */
+  async checkOpenAIAvailable() {
+    try {
+      if (!this.apiKey) {
+        console.error('OpenAI API key not configured. Set OPENAI_API_KEY in .env');
+        return false;
+      }
+
+      const url = `${this.baseUrl}/models`;
+      const response = await axios.get(url, {
+        timeout: 10000,
+        headers: {
+          'Authorization': `Bearer ${this.apiKey}`,
+        },
+      });
+
+      const models = response.data.data || [];
+      const modelIds = models.map(m => m.id);
+      
+      if (modelIds.includes(this.model)) {
+        console.log(`OpenAI model ${this.model} is available`);
+        return true;
+      }
+
+      // Check for partial match (e.g., gpt-4o-mini might be listed differently)
+      const hasModel = modelIds.some(id => id.includes(this.model) || this.model.includes(id));
+      if (hasModel) {
+        console.log(`OpenAI model ${this.model} is available`);
+        return true;
+      }
+
+      console.warn(`Model ${this.model} not found in available models`);
+      return true; // Still return true as the API is accessible
+    } catch (error) {
+      if (error.response?.status === 401) {
+        console.error('Invalid OpenAI API key. Please check your OPENAI_API_KEY');
+      } else {
+        console.error('Failed to check OpenAI availability:', error.message);
+      }
+      return false;
+    }
+  }
+
+  /**
    * Check if the configured Ollama model is available
    * @returns {Promise<boolean>} True if model is available
    */
-  async checkModelAvailable() {
+  async checkOllamaModelAvailable() {
     try {
       const url = `${this.baseUrl}/api/tags`;
       const response = await axios.get(url, { timeout: 10000 });

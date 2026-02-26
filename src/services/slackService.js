@@ -37,8 +37,11 @@ class SlackService {
   _setupEventHandlers() {
     // Handle direct messages and channel messages
     this.app.message(async ({ message, say }) => {
+      console.log(`📨 Message received from ${message.user}: "${message.text?.substring(0, 50)}..."`);
+      
       // Ignore bot messages
       if (message.bot_id || message.subtype === 'bot_message') {
+        console.log('   (Ignoring bot message)');
         return;
       }
 
@@ -54,8 +57,11 @@ class SlackService {
 
     // Handle app mentions
     this.app.event('app_mention', async ({ event, say }) => {
+      console.log(`🔔 App mention received from ${event.user}: "${event.text}"`);
+      
       // Remove the bot mention from the text
       const cleanText = event.text.replace(/<@[A-Z0-9]+>/g, '').trim();
+      console.log(`   Clean text: "${cleanText}"`);
 
       // Call registered handlers with cleaned text
       for (const handler of this.messageHandlers) {

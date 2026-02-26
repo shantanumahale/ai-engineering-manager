@@ -55,9 +55,11 @@ function setupMessageHandlers() {
  * Handle bot commands
  */
 async function handleCommand(text, userId, channel, say) {
+  console.log(`🎯 handleCommand called with text: "${text}"`);
   const textLower = text.toLowerCase().trim();
 
   if (textLower.includes('start standup')) {
+    console.log('   -> Matched "start standup" command');
     await say('🚀 Starting daily standup...');
     await standupWorkflow.startDailyStandup();
   } else if (textLower.includes('status')) {
@@ -163,14 +165,26 @@ async function validateSetup() {
   }
   console.log('   ✅ Configuration valid');
 
-  // Check Ollama model availability
+  // Check LLM model availability
   const modelAvailable = await llmService.checkModelAvailable();
   if (!modelAvailable) {
-    console.error(`\n❌ Ollama model '${config.ollama.model}' is not available`);
-    console.log(`   Run: ollama pull ${config.ollama.model}`);
+    const provider = config.llm.provider;
+    if (provider === 'anthropic') {
+      console.error(`\n❌ Anthropic model '${config.anthropic.model}' is not available`);
+      console.log(`   Check your ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN in .env`);
+    } else if (provider === 'openai') {
+      console.error(`\n❌ OpenAI model '${config.openai.model}' is not available`);
+      console.log(`   Check your OPENAI_API_KEY in .env`);
+    } else {
+      console.error(`\n❌ Ollama model '${config.ollama.model}' is not available`);
+      console.log(`   Run: ollama pull ${config.ollama.model}`);
+    }
     return false;
   }
-  console.log(`   ✅ Ollama model '${config.ollama.model}' available`);
+  const provider = config.llm.provider;
+  const modelName = provider === 'anthropic' ? config.anthropic.model :
+                    provider === 'openai' ? config.openai.model : config.ollama.model;
+  console.log(`   ✅ ${provider.charAt(0).toUpperCase() + provider.slice(1)} model '${modelName}' available`);
 
   console.log('\n✅ Setup validation passed!\n');
   return true;
@@ -198,10 +212,14 @@ async function main() {
     scheduleStandup();
 
     // Log configuration
+    const llmProvider = config.llm.provider;
+    const llmModel = llmProvider === 'anthropic' ? config.anthropic.model :
+                     llmProvider === 'openai' ? config.openai.model : config.ollama.model;
     console.log('📋 Configuration:');
     console.log(`   Standup Channel: ${config.slack.standupChannel}`);
     console.log(`   Standup Time: ${config.standup.time.hour}:${config.standup.time.minute.toString().padStart(2, '0')} ${config.standup.timezone}`);
-    console.log(`   LLM Model: ${config.ollama.model}`);
+    console.log(`   LLM Provider: ${llmProvider}`);
+    console.log(`   LLM Model: ${llmModel}`);
     console.log(`   JIRA Project: ${config.jira.projectKey}`);
 
     // Start Slack bot

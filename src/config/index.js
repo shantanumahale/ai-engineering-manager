@@ -28,7 +28,35 @@ const config = {
   },
 
   // ====================
-  // Ollama Configuration
+  // LLM Configuration
+  // ====================
+  // Provider: 'openai', 'anthropic', or 'ollama'
+  llm: {
+    provider: process.env.LLM_PROVIDER || 'anthropic', // Default to Anthropic for org setup
+  },
+
+  // ====================
+  // Anthropic Configuration
+  // ====================
+  anthropic: {
+    baseUrl: process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com', // Custom base URL for org proxies
+    apiKey: process.env.ANTHROPIC_AUTH_TOKEN || process.env.ANTHROPIC_API_KEY || '',
+    model: process.env.ANTHROPIC_MODEL || 'claude-sonnet-4-20250514', // Default model
+    timeout: parseInt(process.env.ANTHROPIC_TIMEOUT || '60000', 10), // 60 seconds
+  },
+
+  // ====================
+  // OpenAI Configuration
+  // ====================
+  openai: {
+    baseUrl: process.env.OPENAI_BASE_URL || 'https://api.openai.com/v1', // Custom base URL for org proxies
+    apiKey: process.env.OPENAI_API_KEY || '',
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini', // Cost-effective and capable
+    timeout: parseInt(process.env.OPENAI_TIMEOUT || '60000', 10), // 60 seconds
+  },
+
+  // ====================
+  // Ollama Configuration (for local models)
   // ====================
   ollama: {
     baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434',
@@ -48,6 +76,11 @@ const config = {
     },
     // Timezone for scheduling (IST)
     timezone: 'Asia/Kolkata',
+    // Maximum back-and-forth conversations per developer before offering 1-1 follow-up
+    maxConversations: parseInt(process.env.STANDUP_MAX_CONVERSATIONS || '3', 10),
+    // Team members to exclude from standup (non-developers like EM, PM)
+    // Comma-separated list of names or emails
+    excludedMembers: (process.env.STANDUP_EXCLUDED_MEMBERS || 'Keshav,Sushma').split(',').map(s => s.trim().toLowerCase()),
   },
 
   // ===================
